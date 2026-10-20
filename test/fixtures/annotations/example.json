@@ -1,0 +1,213 @@
+{
+  "v": 1,
+  "briefing_id": "3f9a1c0b7d2e",
+  "target": { "kind": "worktree", "base": "a1b2c3d4e5f6", "head": "WORKTREE" },
+  "sessions": ["5d1e9a7c-0b2f-4c3e-9f1a-2b7d8e6c4a10"],
+  "generated_at": "2026-10-20T15:42:10.000Z",
+  "status": "complete",
+  "errors": [],
+  "enrich": {
+    "provider": "claude-headless",
+    "model": "claude-opus-5-5",
+    "prompt_version": "1",
+    "quality": { "suspects": 2, "rewritten": 1, "dropped": 0 }
+  },
+  "briefing": {
+    "requirement": "Checkout applies the cart discount twice when an order is placed (PROJ-123).",
+    "approach": "Moved discount logic into one DiscountCalculator, used by both cart and order services, and applied it once in the order pipeline.",
+    "skipped_alternatives": [
+      "Tried guarding the second apply with an `alreadyDiscounted` flag; dropped because the flag would also need to survive order edits."
+    ],
+    "assumptions": ["Percentage and fixed discounts never stack on the same line item."],
+    "not_run": ["The cart page UI was not exercised after CartService changed."]
+  },
+  "read_first": ["h4c1e2a90", "h7b0d3f11", "h2e8a6c55"],
+  "concepts": [
+    {
+      "id": "single-discount",
+      "title": "Apply the discount once",
+      "entry": "h1a9f0c32",
+      "path": [
+        {
+          "step": 1,
+          "role": "blocker",
+          "hunks": [],
+          "hands_off": "Discount logic lives in both CartService and OrderService, so fixing one leaves the other applying it again."
+        },
+        {
+          "step": 2,
+          "role": "enabling",
+          "layer": "domain",
+          "hunks": ["h1a9f0c32", "h7b0d3f11"],
+          "hands_off": "DiscountCalculator.apply(lines) is now the only place discounts are computed."
+        },
+        {
+          "step": 3,
+          "role": "change",
+          "layer": "service",
+          "hunks": ["h4c1e2a90"],
+          "hands_off": "OrderService takes cart totals as already discounted and no longer re-applies."
+        },
+        {
+          "step": 4,
+          "role": "proof",
+          "layer": "test",
+          "hunks": ["h2e8a6c55"],
+          "tests": ["h2e8a6c55"],
+          "hands_off": "Regression test places an order with a 10% discount and checks the total once."
+        }
+      ]
+    }
+  ],
+  "off_path": ["h9d4b7e08"],
+  "warnings": [
+    {
+      "kind": "unexplained",
+      "hunks": ["h9d4b7e08"],
+      "detail": "No agent message or plan step explains this change.",
+      "source": "rules"
+    },
+    {
+      "kind": "weakened_test",
+      "hunks": ["h7b0d3f11"],
+      "detail": "Two expect() calls removed from cart.test.ts, none added.",
+      "source": "rules"
+    }
+  ],
+  "intents": [
+    {
+      "id": "5d1e9a7c:i1",
+      "why": "Cart and order both apply the discount; one shared calculator lets the order path skip it.",
+      "serves": "ticket",
+      "source_msg": {
+        "session": "5d1e9a7c-0b2f-4c3e-9f1a-2b7d8e6c4a10",
+        "msg_id": "m12",
+        "quote": "The discount is computed in both CartService and OrderService. I'll pull it into a DiscountCalculator so only one place applies it."
+      },
+      "link_confidence": "high"
+    },
+    {
+      "id": "5d1e9a7c:i2",
+      "why": "Order totals arrive already discounted from the cart, so re-applying doubles it.",
+      "serves": "5d1e9a7c:i1",
+      "source_msg": {
+        "session": "5d1e9a7c-0b2f-4c3e-9f1a-2b7d8e6c4a10",
+        "msg_id": "m18",
+        "quote": "Now OrderService should trust the cart total instead of applying the discount again."
+      },
+      "link_confidence": "high"
+    },
+    {
+      "id": "5d1e9a7c:i3",
+      "why": "Locks in the fix: one 10% discount on a placed order.",
+      "serves": "5d1e9a7c:i2",
+      "source_msg": {
+        "session": "5d1e9a7c-0b2f-4c3e-9f1a-2b7d8e6c4a10",
+        "msg_id": "m21",
+        "quote": "Adding a regression test that places an order with a 10% discount."
+      }
+    }
+  ],
+  "hunks": [
+    {
+      "id": "h1a9f0c32",
+      "path": "src/pricing/discount-calculator.ts",
+      "status": "added",
+      "old_start": 0,
+      "old_lines": 0,
+      "new_start": 1,
+      "new_lines": 24,
+      "content_hash": "9b1f6c0e2a7d4b38e5f1a2c3d4e5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8",
+      "why": "One home for discount math so cart and order can't disagree.",
+      "intent_id": "5d1e9a7c:i1",
+      "intent_history": [],
+      "external_touched": false,
+      "drift": false,
+      "exec": "tested",
+      "risk": ["money"],
+      "source": { "why": "llm", "exec": "log", "risk": "rules" }
+    },
+    {
+      "id": "h7b0d3f11",
+      "path": "src/cart/cart-service.ts",
+      "status": "modified",
+      "old_start": 40,
+      "old_lines": 18,
+      "new_start": 40,
+      "new_lines": 4,
+      "content_hash": "2c4e6a8b0d1f3a5c7e9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c3e5b7d9f1a3c",
+      "why": "Cart now delegates to DiscountCalculator instead of its own copy.",
+      "intent_id": "5d1e9a7c:i1",
+      "intent_history": [],
+      "external_touched": true,
+      "drift": false,
+      "exec": "ran",
+      "risk": ["money", "deleted_code"],
+      "source": { "why": "llm", "exec": "log", "risk": "rules" },
+      "followups": [
+        {
+          "ask": "what could break",
+          "preset": "what_could_break",
+          "answer": "Anything else calling CartService.applyDiscount directly; git grep finds one caller in admin/refunds.ts.",
+          "kind": "reconstructed",
+          "ts": "2026-10-20T15:50:03.000Z"
+        }
+      ]
+    },
+    {
+      "id": "h4c1e2a90",
+      "path": "src/orders/order-service.ts",
+      "status": "modified",
+      "old_start": 88,
+      "old_lines": 9,
+      "new_start": 74,
+      "new_lines": 3,
+      "content_hash": "7e1a3c5b9d2f4a6c8e0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c",
+      "why": "Order totals arrive already discounted; applying again was the bug.",
+      "intent_id": "5d1e9a7c:i2",
+      "intent_history": ["5d1e9a7c:i1"],
+      "external_touched": false,
+      "drift": false,
+      "exec": "tested",
+      "risk": ["money"],
+      "source": { "why": "llm", "exec": "log", "risk": "rules" }
+    },
+    {
+      "id": "h2e8a6c55",
+      "path": "test/orders/order-service.test.ts",
+      "status": "modified",
+      "old_start": 120,
+      "old_lines": 0,
+      "new_start": 121,
+      "new_lines": 16,
+      "content_hash": "4a6c8e0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c",
+      "why": "Regression test for the double discount.",
+      "intent_id": "5d1e9a7c:i3",
+      "intent_history": [],
+      "external_touched": false,
+      "drift": false,
+      "exec": "tested",
+      "risk": [],
+      "source": { "why": "llm", "exec": "log", "risk": "rules" }
+    },
+    {
+      "id": "h9d4b7e08",
+      "path": "src/config/feature-flags.ts",
+      "status": "modified",
+      "old_start": 12,
+      "old_lines": 1,
+      "new_start": 12,
+      "new_lines": 1,
+      "content_hash": "0f2a4c6e8b0d2f4a6c8e0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a",
+      "why": null,
+      "intent_id": null,
+      "intent_history": [],
+      "serves": "unexplained",
+      "external_touched": false,
+      "drift": false,
+      "exec": "never_executed",
+      "risk": ["config"],
+      "source": { "why": null, "exec": "log", "risk": "rules" }
+    }
+  ]
+}
