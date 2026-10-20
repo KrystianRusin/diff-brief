@@ -1,0 +1,4 @@
+dist/
+tickets/
+package-lock.json
+*.pdf
