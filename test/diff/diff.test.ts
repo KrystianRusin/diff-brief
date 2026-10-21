@@ -353,3 +353,16 @@ describe("parseDiff", () => {
     expect(file!.oldBlob).toBe("1".repeat(40));
   });
 });
+
+describe("diffbrief's own store", () => {
+  test("is never in the diff, ignored or not", () => {
+    repo.write("a.txt", "a\n");
+    repo.commit("init");
+    repo.write(".diffbrief/sessions/x/events.jsonl", "{}\n");
+    repo.write("a.txt", "b\n");
+    expect(worktree().hunks.map((h) => h.path)).toEqual(["a.txt"]);
+
+    repo.write(".gitignore", ".diffbrief/\n");
+    expect(worktree().hunks.map((h) => h.path)).toEqual([".gitignore", "a.txt"]);
+  });
+});

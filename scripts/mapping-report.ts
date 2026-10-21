@@ -1,47 +1,44 @@
-// DB-08 spike: print every hunk of a session's diff with the intent mapping
-// gave it, for a human to label correct / partly / wrong.
+// DB-08 spike: print every hunk of a diff with the intent mapping gave it,
+// for a human to label correct / partly / wrong.
 //
-//   npx tsx scripts/mapping-report.ts [session-id-prefix] [--base <rev>] [--file-mode]
+//   npx tsx scripts/mapping-report.ts [--worktree [base] | --commit <sha> | --range <a>..<b>] [--file-mode]
 //
-// Defaults to the newest session and diffs its base_sha against the working
-// tree. Pass --base to scope a long session to one ticket's changes.
+// Targets and session selection work as in the CLI (DB-09): with no flags,
+// the working tree against its default base. Use --commit to label one
+// ticket's commit.
 import { parseArgs } from "node:util";
-import { targetContents } from "../src/diff/contents.js";
-import { computeDiff, type Hunk } from "../src/diff/index.js";
-import { mapHunks } from "../src/mapping/index.js";
+import { loadBriefingInputs } from "../src/briefing/inputs.js";
+import type { Hunk } from "../src/diff/index.js";
 import type { EventOf } from "../src/schema/events.js";
-import { getBlob, hasBlob } from "../src/store/blobs.js";
 import { findRepoRoot } from "../src/store/layout.js";
-import { listSessions, readEvents } from "../src/store/read.js";
+import { TargetError, type TargetRequest } from "../src/target/index.js";
 
-const { values, positionals } = parseArgs({
-  allowPositionals: true,
-  options: { base: { type: "string" }, "file-mode": { type: "boolean" } },
+const { values } = parseArgs({
+  options: {
+    worktree: { type: "string" },
+    commit: { type: "string" },
+    range: { type: "string" },
+    "file-mode": { type: "boolean" },
+  },
 });
 
 const root = findRepoRoot(process.cwd());
 if (!root) fail("not inside a git repository");
 
-const sessions = listSessions(root);
-const session = positionals[0]
-  ? sessions.find((s) => s.id.startsWith(positionals[0]!))
-  : sessions[0];
-if (!session)
-  fail(positionals[0] ? `no session matching ${positionals[0]}` : "no sessions recorded");
-
-const { events } = readEvents(root, session.id);
-const base = values.base ?? session.baseSha;
-if (!base) fail("session has no session_start; pass --base");
-
-const spec = { kind: "worktree" as const, base };
-const { hunks, stats } = computeDiff(root, spec);
-const { byHunk, deadEnds } = mapHunks({
-  hunks,
-  events,
-  contents: targetContents(root, spec),
-  blob: (h) => (hasBlob(root, h) ? getBlob(root, h) : null),
-  ...(values["file-mode"] ? { mode: "file" as const } : {}),
-});
+const req: TargetRequest = {
+  ...(values.worktree !== undefined ? { worktree: values.worktree } : {}),
+  ...(values.commit !== undefined ? { commit: values.commit } : {}),
+  ...(values.range !== undefined ? { range: values.range } : {}),
+};
+let inputs;
+try {
+  inputs = loadBriefingInputs(root, req, values["file-mode"] ? { mode: "file" } : {});
+} catch (err) {
+  if (err instanceof TargetError) fail(err.message);
+  throw err;
+}
+const { resolved, hunks, stats, sessionIds, events } = inputs;
+const { byHunk, deadEnds } = inputs.mapping;
 
 const intents = new Map<string, EventOf<"intent">>();
 for (const e of events) if (e.type === "intent") intents.set(e.id, e);
@@ -50,9 +47,14 @@ const describe = (id: string) => {
   return i ? `${id} (${i.source}): ${oneLine(i.why, 160)}` : `${id} (unknown intent)`;
 };
 
-console.log(`session ${session.id}${session.ticket ? `  ticket ${session.ticket}` : ""}`);
+const { target } = resolved;
 console.log(
-  `base ${base.slice(0, 12)}..worktree  ${stats.files} files, +${stats.insertions} -${stats.deletions}, ${hunks.length} hunks\n`,
+  `${target.kind} ${target.base.slice(0, 12)}..${target.head === "WORKTREE" ? "worktree" : target.head.slice(0, 12)}` +
+    `  briefing ${resolved.briefingId}`,
+);
+console.log(`sessions: ${sessionIds.length > 0 ? sessionIds.join(", ") : "none"}`);
+console.log(
+  `${stats.files} files, +${stats.insertions} -${stats.deletions}, ${hunks.length} hunks\n`,
 );
 
 hunks.forEach((h, n) => {

@@ -198,6 +198,14 @@ describe("line mode", () => {
     s.link(id, "narration");
     expect(s.map().hunks[0]!.intentId).toBe("narration");
   });
+
+  test("a link wins even when a merged timeline puts it before its edit", () => {
+    const s = scenario({ "a.ts": lines(10) });
+    s.edit("a.ts", s.current("a.ts").replace("line 5\n", "five\n"), "edit's own");
+    s.link("e1", "linked");
+    s.events.unshift(s.events.pop()!);
+    expect(s.map().hunks[0]!.intentId).toBe("linked");
+  });
 });
 
 describe("external changes", () => {

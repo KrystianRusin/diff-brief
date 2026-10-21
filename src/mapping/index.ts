@@ -22,6 +22,9 @@ export type MapInput = {
   // Snapshot by hash, null if it isn't stored (too_large, or lost).
   blob(hash: string): Buffer | null;
   mode?: MappingMode;
+  // Committer time (ms) of the base commit. Snapshots taken before it that
+  // match the base content are already part of the base.
+  baseTime?: number;
 };
 
 export type HunkMapping = {
@@ -70,12 +73,16 @@ export function mapHunks(input: MapInput): MapResult {
 }
 
 // Final intent per edit: its own intent_id, overridden by edit_link events,
-// a later link winning.
+// a later link winning. A link always beats the edit's own field, even when
+// a merged timeline puts the link first.
 function resolveIntents(events: Event[]): Map<string, string | undefined> {
   const intents = new Map<string, string | undefined>();
   for (const e of events) {
-    if (e.type === "edit") intents.set(e.id, e.intent_id);
-    else if (e.type === "edit_link") intents.set(e.edit_id, e.intent_id);
+    if (e.type === "edit") {
+      if (!intents.has(e.id)) intents.set(e.id, e.intent_id);
+    } else if (e.type === "edit_link") {
+      intents.set(e.edit_id, e.intent_id);
+    }
   }
   return intents;
 }
@@ -100,7 +107,27 @@ class Tracker {
   }
 
   run(): void {
+    // A session that went on past the base commit has edits the base already
+    // contains. Start each file's chain after its last snapshot that matches
+    // the base and was taken before the base was committed, instead of
+    // replaying old edits over newer base lines.
+    const syncedUntil = new Map<string, number>();
+    const { baseTime } = this.input;
+    if (baseTime !== undefined) {
+      this.input.events.forEach((e, step) => {
+        if (e.type !== "edit" && e.type !== "external_change") return;
+        if (Date.parse(e.ts) > baseTime || this.lost.has(e.path)) return;
+        if (e.after_hash === this.state(e.path).hash) syncedUntil.set(e.path, step);
+      });
+    }
+
     this.input.events.forEach((e, step) => {
+      if (
+        (e.type === "edit" || e.type === "external_change") &&
+        step <= (syncedUntil.get(e.path) ?? -1)
+      ) {
+        return;
+      }
       if (e.type === "edit") {
         this.guard(e.path, () => {
           const origin: EditOrigin = {

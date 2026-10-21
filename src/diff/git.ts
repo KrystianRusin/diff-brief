@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { STORE_DIR } from "../store/layout.js";
 
 // What to diff. DB-09 resolves CLI flags and default bases into one of these.
 export type DiffSpec =
@@ -41,6 +42,11 @@ const DIFF_FLAGS = [
   "-M",
   "-U3",
 ];
+
+// diffbrief's own store is never part of a briefing, even where .gitignore
+// doesn't cover it. Only for diff: `git add` rejects a pathspec naming an
+// ignored path, even as an exclude.
+const PATHS = ["--", `:(exclude)${STORE_DIR}`];
 
 const MAX_BUFFER = 1024 * 1024 * 1024;
 
@@ -86,12 +92,12 @@ export function runDiff(root: string, spec: DiffSpec): string {
     case "commit": {
       assertRev(spec.sha);
       const parent = hasRev(root, `${spec.sha}^`) ? `${spec.sha}^` : emptyTree(root);
-      return git(root, ["diff", ...DIFF_FLAGS, parent, spec.sha, "--"]).toString();
+      return git(root, ["diff", ...DIFF_FLAGS, parent, spec.sha, ...PATHS]).toString();
     }
     case "range":
       assertRev(spec.base);
       assertRev(spec.head);
-      return git(root, ["diff", ...DIFF_FLAGS, spec.base, spec.head, "--"]).toString();
+      return git(root, ["diff", ...DIFF_FLAGS, spec.base, spec.head, ...PATHS]).toString();
   }
 }
 
@@ -108,6 +114,11 @@ function worktreeDiff(root: string, base: string): string {
   try {
     try {
       copyFileSync(realIndex, env.GIT_INDEX_FILE);
+      // Keep the index's mtime: git rehashes files modified in the same
+      // second as the index ("racy git"), judged by the index file's mtime.
+      // A fresh mtime would let a same-size edit from that second look clean.
+      const { atime, mtime } = statSync(realIndex);
+      utimesSync(env.GIT_INDEX_FILE, atime, mtime);
       git(root, ["add", "-A", "--ignore-errors"], { env });
     } catch {
       rmSync(env.GIT_INDEX_FILE, { force: true });
@@ -115,7 +126,7 @@ function worktreeDiff(root: string, base: string): string {
       if (hasRev(root, "HEAD")) git(root, ["read-tree", "HEAD"], { env });
       git(root, ["add", "-A", "--ignore-errors"], { env });
     }
-    return git(root, ["diff", "--cached", ...DIFF_FLAGS, base, "--"], { env }).toString();
+    return git(root, ["diff", "--cached", ...DIFF_FLAGS, base, ...PATHS], { env }).toString();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

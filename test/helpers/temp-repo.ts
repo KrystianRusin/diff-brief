@@ -7,7 +7,9 @@ export type TempRepo = {
   dir: string;
   git(...args: string[]): string;
   write(path: string, content: string): void;
-  commit(message: string): string;
+  // `at` sets author and committer date, for tests that compare commit
+  // times with session timestamps.
+  commit(message: string, at?: Date): string;
   cleanup(): void;
 };
 
@@ -25,8 +27,9 @@ const gitEnv = {
 export function makeTempRepo(): TempRepo {
   const dir = mkdtempSync(join(tmpdir(), "diffbrief-test-"));
 
-  const git = (...args: string[]) =>
-    execFileSync("git", args, { cwd: dir, env: gitEnv, encoding: "utf8" }).trimEnd();
+  const run = (args: string[], env: NodeJS.ProcessEnv = gitEnv) =>
+    execFileSync("git", args, { cwd: dir, env, encoding: "utf8" }).trimEnd();
+  const git = (...args: string[]) => run(args);
 
   git("init", "--quiet", "--initial-branch=main");
 
@@ -38,9 +41,13 @@ export function makeTempRepo(): TempRepo {
       mkdirSync(dirname(full), { recursive: true });
       writeFileSync(full, content);
     },
-    commit(message) {
+    commit(message, at) {
       git("add", "-A");
-      git("commit", "--quiet", "--allow-empty", "-m", message);
+      const date = at?.toISOString();
+      run(
+        ["commit", "--quiet", "--allow-empty", "-m", message],
+        date ? { ...gitEnv, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : gitEnv,
+      );
       return git("rev-parse", "HEAD");
     },
     cleanup() {
