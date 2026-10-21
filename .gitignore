@@ -2,3 +2,5 @@ tickets/
 node_modules/
 dist/
 Diff Briefing Design Doc Sketch.pdf
+.diffbrief/
+.claude/settings.local.json
