@@ -53,6 +53,20 @@ const specEvents = [
     before_hash: null,
     after_hash: hash,
   },
+  {
+    v: 1,
+    type: "edit",
+    ts,
+    id: "toolu_01",
+    agent_id: "a1e3a1bff96fe0132",
+    path: "src/format.js",
+    tool: "Write",
+    before_hash: null,
+    after_hash: hash,
+  },
+  { v: 1, type: "intent", ts, id: "i3", why: "Run the cart tests", source: "command_description" },
+  { v: 1, type: "intent", ts, id: "i4", why: "Fix the double discount", source: "prompt" },
+  { v: 1, type: "edit_link", ts, edit_id: "toolu_01", intent_id: "i2", msg_ref: "42" },
   { v: 1, type: "external_change", ts, path: "src/a.ts", before_hash: hash, after_hash: null },
   {
     v: 1,
@@ -63,6 +77,17 @@ const specEvents = [
     exit: 0,
     duration_ms: 8120,
     kind: "test",
+  },
+  {
+    v: 1,
+    type: "command",
+    ts,
+    id: "toolu_02",
+    agent_id: "a1e3a1bff96fe0132",
+    cmd: 'node -e "process.exit(3)"',
+    description: "Run node that exits with code 3",
+    exit: 3,
+    duration_ms: 224,
   },
   { v: 1, type: "session_end", ts, transcript_path: "/tmp/t.jsonl" },
 ];
@@ -86,6 +111,15 @@ describe("events", () => {
 
   test("rejects unknown event type", () => {
     expect(() => parseEvent({ v: 1, type: "telemetry", ts })).toThrow();
+  });
+
+  test("rejects an unknown intent source", () => {
+    expect(() => parseEvent({ ...specEvents[2], source: "guess" })).toThrow();
+  });
+
+  test("rejects an edit_link missing its edit or intent", () => {
+    expect(() => parseEvent({ v: 1, type: "edit_link", ts, intent_id: "i2" })).toThrow();
+    expect(() => parseEvent({ v: 1, type: "edit_link", ts, edit_id: "e1" })).toThrow();
   });
 
   test("rejects malformed hashes and timestamps", () => {
