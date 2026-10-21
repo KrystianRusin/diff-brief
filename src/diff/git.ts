@@ -63,7 +63,7 @@ function assertRev(rev: string): void {
   if (rev === "" || rev.startsWith("-")) throw new DiffError(`invalid revision: ${rev}`);
 }
 
-function hasRev(root: string, rev: string): boolean {
+export function hasRev(root: string, rev: string): boolean {
   try {
     git(root, ["rev-parse", "--verify", "--quiet", rev]);
     return true;

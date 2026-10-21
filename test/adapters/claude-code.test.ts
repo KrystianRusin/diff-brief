@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { capture } from "../../src/adapters/claude-code/capture.js";
@@ -11,20 +11,11 @@ import { makeTempRepo, type TempRepo } from "../helpers/temp-repo.js";
 const EXPECTED = join(import.meta.dirname, "../fixtures/claude-code/expected");
 const UPDATE = process.env.UPDATE_GOLDEN === "1";
 
-// The subagent-tasks run had a Bash command append to src/cart.js, standing
-// in for a formatter.
-const SIDE_EFFECTS: Record<string, Record<string, (repo: TempRepo) => void>> = {
-  "subagent-tasks": {
-    toolu_01Use6aig3iZRuc325bdrjkS: (repo) =>
-      appendFileSync(join(repo.dir, "src/cart.js"), "// touched by script\n"),
-  },
-};
-
 const runs: ReplayResult[] = [];
 afterEach(() => runs.splice(0).forEach((r) => r.cleanup()));
 
 function replay(name: string) {
-  const run = replayFixture(name, { sideEffects: SIDE_EFFECTS[name] });
+  const run = replayFixture(name);
   runs.push(run);
   const events = run.lines.map((l) => parseEvent(JSON.parse(l)));
   return { run, events };

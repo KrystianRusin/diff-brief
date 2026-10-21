@@ -44,6 +44,16 @@ export type ReplayResult = {
   cleanup(): void;
 };
 
+// What Bash commands in the recordings did to the working tree, which the
+// payloads don't capture. subagent-tasks had one append to src/cart.js,
+// standing in for a formatter.
+const FIXTURE_SIDE_EFFECTS: Record<string, ReplayOptions["sideEffects"]> = {
+  "subagent-tasks": {
+    toolu_01Use6aig3iZRuc325bdrjkS: (repo) =>
+      appendFileSync(join(repo.dir, "src/cart.js"), "// touched by script\n"),
+  },
+};
+
 export function replayFixture(name: string, opts: ReplayOptions = {}): ReplayResult {
   const dir = join(FIXTURES, name);
   const recorded = readJsonl<Recorded>(join(dir, "payloads.jsonl"));
@@ -53,7 +63,7 @@ export function replayFixture(name: string, opts: ReplayOptions = {}): ReplayRes
 
   seedRepo(repo, recorded);
   const transcripts = transcriptFiles(dir);
-  const sideEffects = new Map(Object.entries(opts.sideEffects ?? {}));
+  const sideEffects = new Map(Object.entries(opts.sideEffects ?? FIXTURE_SIDE_EFFECTS[name] ?? {}));
   const timings: ReplayResult["timings"] = [];
   let sessionId = "";
 
