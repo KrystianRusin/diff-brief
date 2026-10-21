@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { initAction } from "./init.js";
 
 function notImplemented(ticket: string) {
   return () => {
@@ -15,7 +16,10 @@ export function buildProgram(): Command {
   program
     .command("init")
     .description("Write hook config for the detected agent and gitignore .diffbrief/")
-    .action(notImplemented("DB-06"));
+    .option("--shared", "write .claude/settings.json (committed) instead of settings.local.json")
+    .option("--nudge", "add a line to CLAUDE.md asking the agent to state intent before edits")
+    .option("--uninstall", "remove diffbrief's hooks and nudge, restoring the original files")
+    .action(initAction);
 
   program
     .command("view")

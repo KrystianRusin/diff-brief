@@ -62,6 +62,12 @@ export function configPath(root: string): string {
   return join(root, STORE_DIR, "config.json");
 }
 
+// Original contents of files `init` modified outside .diffbrief/, so
+// `init --uninstall` can put them back exactly.
+export function installRecordPath(root: string): string {
+  return join(root, STORE_DIR, "install.json");
+}
+
 // Repo root for a working directory, or null outside a git repo.
 export function findRepoRoot(cwd: string): string | null {
   try {
