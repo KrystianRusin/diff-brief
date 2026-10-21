@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { gunzipSync, gzipSync } from "node:zlib";
+import { crypto, fs, zlib } from "./builtins.js";
 import { writeFileAtomic } from "./fs-util.js";
 import { blobPath } from "./layout.js";
 
@@ -8,20 +6,20 @@ import { blobPath } from "./layout.js";
 // the same hash appears in events.jsonl as before_hash/after_hash.
 
 export function hashContent(content: Buffer | string): string {
-  return createHash("sha256").update(content).digest("hex");
+  return crypto().createHash("sha256").update(content).digest("hex");
 }
 
 export function putBlob(root: string, content: Buffer | string): string {
   const hash = hashContent(content);
   const path = blobPath(root, hash);
-  if (!existsSync(path)) writeFileAtomic(path, gzipSync(content));
+  if (!fs.existsSync(path)) writeFileAtomic(path, zlib().gzipSync(content));
   return hash;
 }
 
 export function hasBlob(root: string, hash: string): boolean {
-  return existsSync(blobPath(root, hash));
+  return fs.existsSync(blobPath(root, hash));
 }
 
 export function getBlob(root: string, hash: string): Buffer {
-  return gunzipSync(readFileSync(blobPath(root, hash)));
+  return zlib().gunzipSync(fs.readFileSync(blobPath(root, hash)));
 }

@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { childProcess } from "./builtins.js";
 
 // Everything diffbrief writes lives under <repo>/.diffbrief/. This module is
 // the only place that knows the layout.
@@ -71,11 +71,13 @@ export function installRecordPath(root: string): string {
 // Repo root for a working directory, or null outside a git repo.
 export function findRepoRoot(cwd: string): string | null {
   try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+    return childProcess()
+      .execFileSync("git", ["rev-parse", "--show-toplevel"], {
+        cwd,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+      .trim();
   } catch {
     return null;
   }

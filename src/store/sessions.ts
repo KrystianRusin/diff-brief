@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import type { Event } from "../schema/events.js";
+import { fs } from "./builtins.js";
 import { appendLine, writeFileAtomic } from "./fs-util.js";
 import { eventsPath, logPath, statePath } from "./layout.js";
 
@@ -15,7 +15,7 @@ export function appendEvent(root: string, sessionId: string, event: Event): void
 // file reads as undefined so the hook can start fresh instead of failing.
 export function readState<T>(root: string, sessionId: string): T | undefined {
   try {
-    return JSON.parse(readFileSync(statePath(root, sessionId), "utf8")) as T;
+    return JSON.parse(fs.readFileSync(statePath(root, sessionId), "utf8")) as T;
   } catch {
     return undefined;
   }

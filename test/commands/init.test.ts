@@ -85,7 +85,6 @@ describe("fresh repo", () => {
       "PostToolUseFailure",
       "PostToolBatch",
       "TaskCreated",
-      "TaskCompleted",
       "SubagentStop",
       "Stop",
       "SessionEnd",

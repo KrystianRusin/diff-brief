@@ -18,6 +18,7 @@ const MARKER = "# diffbrief";
 const NUDGE = "Before each edit, say in one sentence why you're making it.";
 
 // From DB-05's revised table: no PreToolUse, narration resolved per batch.
+// No TaskCompleted either: the transcript walk sees the TaskUpdate itself.
 const HOOKS: { event: string; matcher?: string }[] = [
   { event: "SessionStart" },
   { event: "UserPromptSubmit" },
@@ -25,7 +26,6 @@ const HOOKS: { event: string; matcher?: string }[] = [
   { event: "PostToolUseFailure", matcher: "Bash" },
   { event: "PostToolBatch", matcher: "*" },
   { event: "TaskCreated" },
-  { event: "TaskCompleted" },
   { event: "SubagentStop" },
   { event: "Stop" },
   { event: "SessionEnd" },
