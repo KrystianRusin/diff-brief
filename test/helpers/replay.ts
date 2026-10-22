@@ -144,7 +144,9 @@ function seedRepo(repo: TempRepo, recorded: Recorded[]): void {
     }
   }
   repo.write(".gitignore", ".diffbrief/\n");
-  repo.commit("base");
+  // Dated before the recording, as a real base commit would be, so session
+  // selection (DB-09) doesn't take the session for work the base contains.
+  repo.commit("base", new Date((recorded[0]?.t ?? Date.now()) - 60_000));
 }
 
 // Do to the working tree what the tool did, before its PostToolUse fires.

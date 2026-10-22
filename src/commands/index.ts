@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { initAction } from "./init.js";
+import { showAction } from "./show.js";
 
 function notImplemented(ticket: string) {
   return () => {
@@ -20,6 +21,17 @@ export function buildProgram(): Command {
     .option("--nudge", "add a line to CLAUDE.md asking the agent to state intent before edits")
     .option("--uninstall", "remove diffbrief's hooks and nudge, restoring the original files")
     .action(initAction);
+
+  program
+    .command("show")
+    .description("Print the diff grouped by the recorded reason for each change")
+    .option("--worktree [base]", "working tree against a base (default)")
+    .option("--commit <sha>", "one commit against its parent")
+    .option("--range <a..b>", "a commit range")
+    .option("--no-diff", "only list hunks, without their lines")
+    .option("--full", "don't shorten reasons or hunks")
+    .option("--no-color", "plain output")
+    .action(showAction);
 
   program
     .command("view")
