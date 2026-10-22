@@ -160,6 +160,7 @@ function namespace(e: Event, sessionId: string): MergedEvent {
         id: ns(e.id),
         ...(e.intent_id ? { intent_id: ns(e.intent_id) } : {}),
         ...(e.msg_ref ? { msg_ref: ns(e.msg_ref) } : {}),
+        ...(e.plan_step ? { plan_step: ns(e.plan_step) } : {}),
       };
     case "edit_link":
       return {
@@ -168,6 +169,7 @@ function namespace(e: Event, sessionId: string): MergedEvent {
         edit_id: ns(e.edit_id),
         intent_id: ns(e.intent_id),
         ...(e.msg_ref ? { msg_ref: ns(e.msg_ref) } : {}),
+        ...(e.plan_step ? { plan_step: ns(e.plan_step) } : {}),
       };
     default:
       return { ...e, session_id: sessionId };

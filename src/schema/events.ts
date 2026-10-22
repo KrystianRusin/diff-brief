@@ -72,6 +72,9 @@ export const EditEvent = z.object({
   after_hash: ContentHash.nullable(),
   intent_id: z.string().optional(),
   msg_ref: z.string().optional(),
+  // Plan-step intent in progress when the edit was made, if its own intent
+  // is something else (usually narration).
+  plan_step: z.string().optional(),
   too_large: z.boolean().optional(), // hashed but no blob stored
 });
 
@@ -85,6 +88,7 @@ export const EditLinkEvent = z.object({
   edit_id: z.string(),
   intent_id: z.string(),
   msg_ref: z.string().optional(),
+  plan_step: z.string().optional(),
 });
 
 // The file changed between agent edits: manual edit, formatter, codegen.

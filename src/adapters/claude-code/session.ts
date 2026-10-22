@@ -29,7 +29,17 @@ export class Session {
 
   // Attach an intent to an edit. If the edit hook hasn't fired yet (the
   // transcript can run ahead of it), park the link for the edit to pick up.
-  link(editId: string, intentId: string, msgRef: string | undefined, ts: string): void {
+  link(
+    editId: string,
+    intentId: string,
+    msgRef: string | undefined,
+    ts: string,
+    planStep?: string,
+  ): void {
+    const extra = {
+      ...(msgRef ? { msg_ref: msgRef } : {}),
+      ...(planStep ? { plan_step: planStep } : {}),
+    };
     if (editId in this.state.unresolved) {
       delete this.state.unresolved[editId];
       this.emit({
@@ -38,10 +48,10 @@ export class Session {
         ts,
         edit_id: editId,
         intent_id: intentId,
-        ...(msgRef ? { msg_ref: msgRef } : {}),
+        ...extra,
       });
     } else {
-      this.state.links[editId] = { intent_id: intentId, ...(msgRef ? { msg_ref: msgRef } : {}) };
+      this.state.links[editId] = { intent_id: intentId, ...extra };
     }
   }
 

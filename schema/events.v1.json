@@ -214,6 +214,9 @@
         "msg_ref": {
           "type": "string"
         },
+        "plan_step": {
+          "type": "string"
+        },
         "too_large": {
           "type": "boolean"
         }
@@ -243,6 +246,9 @@
           "type": "string"
         },
         "msg_ref": {
+          "type": "string"
+        },
+        "plan_step": {
           "type": "string"
         }
       },

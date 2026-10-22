@@ -201,7 +201,11 @@ function edit(s: Session, p: Payload, agentId: string | undefined): void {
     before_hash: before.hash,
     after_hash: after.hash,
     ...(link
-      ? { intent_id: link.intent_id, ...(link.msg_ref ? { msg_ref: link.msg_ref } : {}) }
+      ? {
+          intent_id: link.intent_id,
+          ...(link.msg_ref ? { msg_ref: link.msg_ref } : {}),
+          ...(link.plan_step ? { plan_step: link.plan_step } : {}),
+        }
       : {}),
     ...(before.tooLarge || after.tooLarge ? { too_large: true } : {}),
     ...agent(agentId),

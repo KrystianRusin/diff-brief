@@ -30,7 +30,7 @@ export type CaptureState = {
   // Edit ids written but not yet linked to an intent, with their agent key.
   unresolved: Record<string, string>;
   // Intents resolved from the transcript before the edit hook fired.
-  links: Record<string, { intent_id: string; msg_ref?: string }>;
+  links: Record<string, { intent_id: string; msg_ref?: string; plan_step?: string }>;
   bashFailures: Record<string, { exit: number; duration_ms: number }>;
   // Task in progress, as of the furthest point any walk has reached.
   plan: { current?: string };

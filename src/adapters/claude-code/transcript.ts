@@ -154,6 +154,9 @@ function onToolUse(s: Session, walk: Walk, b: Block, ts: string, agentId?: strin
 // Intent sources in priority order (DB-04): narration, plan step, the batch's
 // Bash description, the prompt.
 function resolveEdit(s: Session, walk: Walk, editId: string, ts: string, agentId?: string): void {
+  // The task in progress is kept beside whatever explains the edit, so
+  // enrich can still group edits by plan step (DB-10).
+  const step = s.state.plan.current ? `p${s.state.plan.current}` : undefined;
   const n = walk.narration;
   if (n) {
     const msgRef = n.msgIds[n.msgIds.length - 1];
@@ -170,9 +173,9 @@ function resolveEdit(s: Session, walk: Walk, editId: string, ts: string, agentId
         ...agent(agentId),
       });
     }
-    return s.link(editId, n.intentId, msgRef, ts);
+    return s.link(editId, n.intentId, msgRef, ts, step);
   }
-  if (s.state.plan.current) return s.link(editId, `p${s.state.plan.current}`, undefined, ts);
+  if (step) return s.link(editId, step, undefined, ts);
 
   const c = walk.batchCommand;
   if (c) {
@@ -188,11 +191,11 @@ function resolveEdit(s: Session, walk: Walk, editId: string, ts: string, agentId
         ...agent(agentId),
       });
     }
-    return s.link(editId, c.intentId, undefined, ts);
+    return s.link(editId, c.intentId, undefined, ts, step);
   }
 
   const prompt = walk.prompt ?? s.state.lastPrompt;
-  if (prompt) s.link(editId, s.promptIntent(prompt, agentId, ts), undefined, ts);
+  if (prompt) s.link(editId, s.promptIntent(prompt, agentId, ts), undefined, ts, step);
   // Otherwise left unresolved; SessionEnd falls back to the last prompt.
 }
 
