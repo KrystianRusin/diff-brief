@@ -21,6 +21,7 @@ test("groups the recorded worktree diff by reason", () => {
   expect(lines[2]).toBe("4 hunks: 4 explained by 4 intents, 0 unexplained");
   const groups = lines.filter((l) => l.startsWith("▸"));
   expect(groups.map((g) => g.split(" · ")[0])).toEqual([
+    "▸ read these first",
     "▸ plan step",
     "▸ delegated to a subagent",
     "▸ plan step",
@@ -28,6 +29,9 @@ test("groups the recorded worktree diff by reason", () => {
   ]);
   expect(out).toContain("Fix double discount in src/order.js");
   expect(out).toContain("Run formatter-simulation script on src/cart.js");
+  // The order fix was tested; the script that appended to cart.js ran last.
+  expect(out).toMatch(/src\/order.js @@ \S+ \S+ {2}\[test run after\]/);
+  expect(out).toMatch(/src\/cart.js @@ \S+ \S+ {2}\[nothing ran after\]/);
   expect(out).not.toContain("\x1b[");
 });
 

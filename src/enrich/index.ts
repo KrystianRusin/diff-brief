@@ -7,3 +7,9 @@ export {
   type PackOptions,
   type PlanStep,
 } from "./context-pack.js";
+export {
+  enrichDeterministic,
+  type DeterministicResult,
+  type Warning,
+} from "./deterministic/index.js";
+export { loadRiskRules, RiskConfigError, type RiskRule } from "./deterministic/risk-rules.js";
