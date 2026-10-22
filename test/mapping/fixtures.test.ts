@@ -51,14 +51,14 @@ test("bugfix-basic: unnarrated writes fall back to the prompt", () => {
   });
 });
 
-test("subagent-tasks: plan steps, the narrated fix in history, the script's line unexplained", () => {
+test("subagent-tasks: plan steps, the delegation, the narrated fix in history, the script's line", () => {
   expect(mapFixture("subagent-tasks")).toEqual({
     rows: [
-      ["src/cart.js", undefined, "unexplained", [], true],
-      ["src/format.js", "plan_step", "p1", [], false],
+      ["src/cart.js", "plan_step", "p4", [], false],
+      ["src/format.js", "delegation", "i1", [], false],
       ["src/order.js", "plan_step", "p2", [], false],
       // Written expecting 81 under p3, then corrected after "The test failed as intended".
-      ["test/order.test.js", "plan_step", "p3", ["i1"], false],
+      ["test/order.test.js", "plan_step", "p3", ["i2"], false],
     ],
     deadEnds: [],
   });

@@ -15,19 +15,19 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-test("groups the recorded worktree diff by reason, unexplained last", () => {
+test("groups the recorded worktree diff by reason", () => {
   const out = renderShow(loadBriefingInputs(run.repo.dir, {}), { diff: false });
   const lines = out.split("\n");
-  expect(lines[2]).toBe("4 hunks: 3 explained by 3 intents, 1 unexplained");
+  expect(lines[2]).toBe("4 hunks: 4 explained by 4 intents, 0 unexplained");
   const groups = lines.filter((l) => l.startsWith("▸"));
   expect(groups.map((g) => g.split(" · ")[0])).toEqual([
     "▸ plan step",
+    "▸ delegated to a subagent",
     "▸ plan step",
     "▸ plan step",
-    "▸ unexplained",
   ]);
   expect(out).toContain("Fix double discount in src/order.js");
-  expect(out).toMatch(/src\/cart.js @@ \S+ \S+ {2}also changed outside the agent/);
+  expect(out).toContain("Run formatter-simulation script on src/cart.js");
   expect(out).not.toContain("\x1b[");
 });
 

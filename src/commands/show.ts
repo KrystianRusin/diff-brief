@@ -17,6 +17,7 @@ const DIFF_LINES = 8;
 const SOURCE_LABEL: Record<EventOf<"intent">["source"], string> = {
   narration: "agent said",
   plan_step: "plan step",
+  delegation: "delegated to a subagent",
   command_description: "command description",
   prompt: "prompt",
 };
@@ -62,7 +63,7 @@ export function renderShow(inputs: BriefingInputs, opts: ShowOptions = {}): stri
   groups.delete("");
   out.push(
     dim(
-      `${hunks.length} hunks: ${hunks.length - unexplained.length} explained by ${groups.size} intents, ${unexplained.length} unexplained`,
+      `${hunks.length} hunks: ${hunks.length - unexplained.length} explained by ${groups.size} ${groups.size === 1 ? "intent" : "intents"}, ${unexplained.length} unexplained`,
     ),
   );
 

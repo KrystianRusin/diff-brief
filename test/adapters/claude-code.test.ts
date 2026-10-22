@@ -112,10 +112,22 @@ describe("fixture specifics", () => {
 
     const sub = edits.find(suffix("nJF1ep"));
     expect(sub).toMatchObject({ path: "src/format.js", agent_id: "a1e3a1bff96fe0132" });
-    expect(intentFor("nJF1ep")).toMatchObject({ id: "p1" });
+    // Explained by the task the parent handed over, which serves plan step p1.
+    expect(intentFor("nJF1ep")).toMatchObject({
+      source: "delegation",
+      why: expect.stringMatching(/^Add formatPrice to format.js\n\nIn the repo/),
+      serves: "p1",
+    });
 
-    const external = of(events, "external_change");
-    expect(external.map((e) => e.path)).toEqual(["src/cart.js"]);
+    // The script's append is an edit by its Bash call, under the task in
+    // progress, not an unexplained external change.
+    const script = edits.find((e) => e.path === "src/cart.js");
+    expect(script).toMatchObject({
+      tool: "Bash",
+      id: "toolu_01Use6aig3iZRuc325bdrjkS:src/cart.js",
+    });
+    expect(linked.get(script!.id)).toMatchObject({ id: "p4", source: "plan_step" });
+    expect(of(events, "external_change")).toEqual([]);
   });
 
   test("tool-failures: failed command, failed read, rejected edit", () => {
@@ -181,6 +193,122 @@ describe("live behaviour", () => {
     send({ hook_event_name: "UserPromptSubmit", prompt: "second" });
     expect(events().map((e) => e.type)).toEqual(["session_start", "prompt"]);
     expect(of(events(), "session_start")[0]?.prompt).toBe("first");
+  });
+
+  // Minimal Claude Code transcript lines.
+  let clock = Date.parse("2026-10-21T10:00:00Z");
+  const at = () => new Date((clock += 1000)).toISOString();
+  const said = (text: string) => ({
+    type: "assistant",
+    timestamp: at(),
+    message: { content: [{ type: "text", text }] },
+  });
+  const calls = (name: string, id: string, input: Record<string, unknown>) => ({
+    type: "assistant",
+    timestamp: at(),
+    message: { content: [{ type: "tool_use", id, name, input }] },
+  });
+  const result = (id: string) => ({
+    type: "user",
+    timestamp: at(),
+    message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
+  });
+  const asked = (text: string) => ({
+    type: "user",
+    timestamp: at(),
+    message: { content: [{ type: "text", text }] },
+  });
+  const append = (path: string, ...entries: object[]) => {
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, entries.map((e) => JSON.stringify(e) + "\n").join(""), { flag: "a" });
+  };
+
+  // A session with a main transcript and one subagent's, beside it the way
+  // Claude Code lays them out.
+  function withSubagent() {
+    repo = makeTempRepo();
+    repo.write("a.txt", "one\n");
+    repo.commit("base");
+    const dir = join(repo.dir, ".git", "transcripts");
+    const main = join(dir, "main.jsonl");
+    const sub = join(dir, "main", "subagents", "agent-sub1.jsonl");
+    append(main);
+    const batch = (agentId?: string, tool_calls: object[] = []) =>
+      send({
+        hook_event_name: "PostToolBatch",
+        transcript_path: main,
+        tool_calls,
+        ...(agentId ? { agent_id: agentId } : {}),
+      });
+    send({ hook_event_name: "UserPromptSubmit", prompt: "add b", transcript_path: main });
+    return { main, sub, batch };
+  }
+
+  const PROMPT = "Create b.txt containing hi.";
+  function subagentWrites(sub: string, batch: (agentId?: string) => void) {
+    append(sub, asked(PROMPT), calls("Write", "w1", { file_path: join(repo.dir, "b.txt") }));
+    writeFileSync(join(repo.dir, "b.txt"), "hi\n");
+    send({
+      hook_event_name: "PostToolUse",
+      tool_name: "Write",
+      tool_use_id: "w1",
+      agent_id: "sub1",
+      tool_input: { file_path: join(repo.dir, "b.txt"), content: "hi\n" },
+      tool_response: { type: "create", originalFile: null },
+    });
+    append(sub, result("w1"));
+    batch("sub1");
+  }
+
+  test("a subagent's unnarrated edit is explained by its delegation, serving the parent's reason", () => {
+    const { main, sub, batch } = withSubagent();
+    // The subagent's batch is walked before the parent's Agent call reaches
+    // the main transcript.
+    subagentWrites(sub, batch);
+    append(
+      main,
+      said("Handing the new file to a subagent so the docs stay in sync."),
+      calls("Agent", "ag1", { description: "Create b.txt", prompt: PROMPT }),
+      result("ag1"),
+    );
+    send({ hook_event_name: "Stop", transcript_path: main });
+
+    const intents = new Map(of(events(), "intent").map((i) => [i.id, i]));
+    const edit = intentsByEdit(events()).get("w1");
+    expect(edit).toMatchObject({ source: "delegation", why: `Create b.txt\n\n${PROMPT}` });
+    expect(intents.get(edit!.serves!)).toMatchObject({
+      source: "narration",
+      why: "Handing the new file to a subagent so the docs stay in sync.",
+    });
+    expect(of(events(), "intent").filter((i) => i.source === "delegation")).toHaveLength(1);
+  });
+
+  test("a delegation the parent's transcript never showed is written from the prompt at session end", () => {
+    const { main, sub, batch } = withSubagent();
+    subagentWrites(sub, batch);
+    send({ hook_event_name: "SessionEnd", transcript_path: main });
+    expect(intentsByEdit(events()).get("w1")).toMatchObject({ source: "delegation", why: PROMPT });
+  });
+
+  test("files a Bash call changed are its edits; changes between turns are the user's", () => {
+    const { main, batch } = withSubagent();
+    const cmd = { command: "sed -i s/one/two/ a.txt", description: "Rename one to two" };
+    append(main, calls("Bash", "b1", cmd), result("b1"));
+    writeFileSync(join(repo.dir, "a.txt"), "two\n");
+    batch(undefined, [{ tool_name: "Bash", tool_use_id: "b1", tool_input: cmd }]);
+    // The user edits while the agent is idle, then sends the next prompt.
+    writeFileSync(join(repo.dir, "a.txt"), "three\n");
+    send({ hook_event_name: "UserPromptSubmit", prompt: "next", transcript_path: main });
+
+    const [edit] = of(events(), "edit");
+    expect(edit).toMatchObject({ id: "b1:a.txt", path: "a.txt", tool: "Bash" });
+    expect(intentsByEdit(events()).get("b1:a.txt")).toMatchObject({
+      source: "command_description",
+      why: "Rename one to two",
+    });
+    expect(of(events(), "external_change")).toMatchObject([
+      { path: "a.txt", before_hash: edit!.after_hash },
+    ]);
   });
 
   test("ticket comes from the branch name", () => {

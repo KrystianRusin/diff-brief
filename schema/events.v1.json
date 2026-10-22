@@ -94,7 +94,7 @@
         },
         "source": {
           "type": "string",
-          "enum": ["narration", "plan_step", "command_description", "prompt"]
+          "enum": ["narration", "plan_step", "delegation", "command_description", "prompt"]
         },
         "msg_ref": {
           "type": "string"

@@ -141,8 +141,14 @@ function onToolUse(s: Session, walk: Walk, b: Block, ts: string, agentId?: strin
       walk.batchCommand = { text: input.description };
     }
     walk.pending[id] = { name, input, ts };
+    // Files the command changed, found at PostToolBatch.
+    const edits = s.state.bashEdits[id];
+    delete s.state.bashEdits[id];
+    for (const editId of edits ?? []) resolveEdit(s, walk, editId, ts, agentId);
   } else if (READ_TOOLS.has(name)) {
     walk.pending[id] = { name, input, ts };
+  } else if (name === "Agent" || name === "Task") {
+    onDelegate(s, walk, input, ts, agentId);
   } else if (name === "TaskUpdate") {
     const taskId = typeof input.taskId === "string" ? input.taskId : undefined;
     if (!taskId) return;
@@ -151,30 +157,18 @@ function onToolUse(s: Session, walk: Walk, b: Block, ts: string, agentId?: strin
   }
 }
 
-// Intent sources in priority order (DB-04): narration, plan step, the batch's
-// Bash description, the prompt.
+// Intent sources in priority order (DB-04): narration, the delegation (for a
+// subagent), plan step, the batch's Bash description, the prompt.
 function resolveEdit(s: Session, walk: Walk, editId: string, ts: string, agentId?: string): void {
   // The task in progress is kept beside whatever explains the edit, so
   // enrich can still group edits by plan step (DB-10).
   const step = s.state.plan.current ? `p${s.state.plan.current}` : undefined;
-  const n = walk.narration;
-  if (n) {
-    const msgRef = n.msgIds[n.msgIds.length - 1];
-    if (!n.intentId) {
-      n.intentId = s.nextId("i");
-      s.emit({
-        v: 1,
-        type: "intent",
-        ts,
-        id: n.intentId,
-        why: n.text,
-        source: "narration",
-        ...(msgRef ? { msg_ref: msgRef } : {}),
-        ...agent(agentId),
-      });
-    }
-    return s.link(editId, n.intentId, msgRef, ts, step);
-  }
+  const n = narrationIntent(s, walk, ts, agentId);
+  if (n) return s.link(editId, n.intentId, n.msgRef, ts, step);
+  // A subagent's prompt is its parent's request, more specific to its edits
+  // than the parent's plan step.
+  const delegated = agentId && walk.prompt ? delegation(s, walk.prompt) : undefined;
+  if (delegated) return s.link(editId, delegated, undefined, ts, step);
   if (step) return s.link(editId, step, undefined, ts);
 
   const c = walk.batchCommand;
@@ -197,6 +191,86 @@ function resolveEdit(s: Session, walk: Walk, editId: string, ts: string, agentId
   const prompt = walk.prompt ?? s.state.lastPrompt;
   if (prompt) s.link(editId, s.promptIntent(prompt, agentId, ts), undefined, ts, step);
   // Otherwise left unresolved; SessionEnd falls back to the last prompt.
+}
+
+// The narration for the current batch as an intent, written the first time
+// something needs it. A subagent's narration serves its delegation.
+function narrationIntent(
+  s: Session,
+  walk: Walk,
+  ts: string,
+  agentId?: string,
+): { intentId: string; msgRef?: string } | undefined {
+  const n = walk.narration;
+  if (!n) return undefined;
+  const msgRef = n.msgIds[n.msgIds.length - 1];
+  if (!n.intentId) {
+    n.intentId = s.nextId("i");
+    const serves = agentId && walk.prompt ? delegation(s, walk.prompt) : undefined;
+    s.emit({
+      v: 1,
+      type: "intent",
+      ts,
+      id: n.intentId,
+      why: n.text,
+      ...(serves ? { serves } : {}),
+      source: "narration",
+      ...(msgRef ? { msg_ref: msgRef } : {}),
+      ...agent(agentId),
+    });
+  }
+  return { intentId: n.intentId, ...(msgRef ? { msgRef } : {}) };
+}
+
+// An Agent call: the task it hands over, serving the parent's narration or
+// plan step. The subagent's walk finds it by the prompt text, which is the
+// first message of its transcript.
+function onDelegate(
+  s: Session,
+  walk: Walk,
+  input: Record<string, unknown>,
+  ts: string,
+  agentId?: string,
+): void {
+  if (typeof input.prompt !== "string" || !input.prompt.trim()) return;
+  const id = delegation(s, input.prompt);
+  const d = s.state.delegations[input.prompt.trim()]!;
+  if (d.emitted) return;
+  const n = narrationIntent(s, walk, ts, agentId);
+  const serves = n?.intentId ?? (s.state.plan.current ? `p${s.state.plan.current}` : undefined);
+  const description = typeof input.description === "string" ? input.description.trim() : "";
+  s.emit({
+    v: 1,
+    type: "intent",
+    ts,
+    id,
+    why: description ? `${description}\n\n${input.prompt.trim()}` : input.prompt.trim(),
+    ...(serves ? { serves } : {}),
+    source: "delegation",
+    ...(n?.msgRef ? { msg_ref: n.msgRef } : {}),
+    ...agent(agentId),
+  });
+  d.emitted = true;
+}
+
+// The delegation intent id for a subagent prompt, reserved on first sight.
+function delegation(s: Session, prompt: string): string {
+  const key = prompt.trim();
+  const known = s.state.delegations[key];
+  if (known) return known.id;
+  const id = s.nextId("i");
+  s.state.delegations[key] = { id, emitted: false };
+  return id;
+}
+
+// Delegations only a subagent's transcript showed (the parent's Agent call
+// never turned up) are written from the prompt alone.
+export function flushDelegations(s: Session, ts: string): void {
+  for (const [prompt, d] of Object.entries(s.state.delegations)) {
+    if (d.emitted) continue;
+    s.emit({ v: 1, type: "intent", ts, id: d.id, why: prompt, source: "delegation" });
+    d.emitted = true;
+  }
 }
 
 function onResult(s: Session, walk: Walk, b: Block, ts: string, agentId?: string): void {

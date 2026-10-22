@@ -37,10 +37,11 @@ export const IntentEvent = z.object({
   id: z.string(),
   why: z.string(),
   serves: z.string().optional(),
-  // narration and plan_step come from the agent; command_description (a Bash
-  // tool's description) and prompt (the user's request) are fallbacks for
-  // edits the agent didn't explain.
-  source: z.enum(["narration", "plan_step", "command_description", "prompt"]),
+  // narration and plan_step come from the agent; delegation is the task a
+  // parent agent handed a subagent (its description and prompt), serving the
+  // parent's reason. command_description (a Bash tool's description) and
+  // prompt (the user's request) are fallbacks for edits nobody explained.
+  source: z.enum(["narration", "plan_step", "delegation", "command_description", "prompt"]),
   msg_ref: z.string().optional(),
 });
 

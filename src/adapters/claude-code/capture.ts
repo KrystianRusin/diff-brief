@@ -3,9 +3,9 @@ import { fs } from "../../store/builtins.js";
 import { assertSafeId, configPath, STORE_DIR } from "../../store/layout.js";
 import { appendLog, readState, writeState } from "../../store/sessions.js";
 import { currentBranch, dirtyPaths, findGitRoot, headContents, headSha } from "./git.js";
-import { agent, readIfExists, Session, snapshot } from "./session.js";
+import { agent, readIfExists, Session, snapshot, type Snapshot } from "./session.js";
 import { normalizeState } from "./state.js";
-import { EDIT_TOOLS, parseExit, walkTranscript } from "./transcript.js";
+import { EDIT_TOOLS, flushDelegations, parseExit, walkTranscript } from "./transcript.js";
 
 // Translates one Claude Code hook payload into events.jsonl lines and blobs
 // (DB-05). Only translates: no model calls, no network.
@@ -14,8 +14,9 @@ export type Payload = Record<string, unknown>;
 export type CaptureOptions = { now?: () => string };
 
 const DEFAULT_TICKET_PATTERN = "[A-Z][A-Z0-9]+-\\d+";
-// Hashing every dirty file at session start is skipped past this; a huge
-// dirty tree is usually an unignored build directory.
+// Hashing every dirty file (at session start, or to find what a command
+// changed) is skipped past this; a huge dirty tree is usually an unignored
+// build directory.
 const MAX_START_DIRTY = 2000;
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
@@ -54,6 +55,9 @@ function dispatch(s: Session, p: Payload, cwd: string): void {
 
   switch (event) {
     case "UserPromptSubmit":
+      // Whatever changed while the agent was idle is the user's, not the
+      // next command's.
+      if (wasStarted) externalChanges(s, s.now());
       if (prompt && wasStarted) s.emit({ v: 1, type: "prompt", ts: s.now(), text: prompt });
       if (prompt) s.state.lastPrompt = prompt;
       return;
@@ -62,6 +66,8 @@ function dispatch(s: Session, p: Payload, cwd: string): void {
     case "PostToolUseFailure":
       return bashFailure(s, p);
     case "PostToolBatch":
+      // Before the walk, so the walk finds the Bash calls' edits to explain.
+      bashEdits(s, p, agentId);
       return pass(s, transcript, agentId ? [agentId] : []);
     case "TaskCreated":
       return taskCreated(s, p, agentId);
@@ -284,6 +290,7 @@ function sessionEnd(s: Session, p: Payload, transcript: string | undefined): voi
   }
   // Links for edits that never fired a hook (rejected edits) are dead now.
   s.state.links = {};
+  flushDelegations(s, ts);
 
   externalChanges(s, ts);
   s.emit({
@@ -296,27 +303,94 @@ function sessionEnd(s: Session, p: Payload, transcript: string | undefined): voi
   // DB-15: spawn a detached `diffbrief enrich --target worktree --open` here.
 }
 
-// Changes nobody reported: commands that rewrote files, edits the user made
-// after the agent's last touch, new files from scripts.
+// Files a batch's Bash calls changed (scripts, codegen, formatters, sed)
+// become edits by that call, so the transcript walk can give them the same
+// reason an Edit would get. Found by comparing the tree with what we last saw,
+// once per batch: hooks run serially, so a PostToolUse per Bash call would
+// add ~100 ms to every command (DB-04). A walk that reads the transcript
+// before this batch ends (a subagent's batch, while this one waits on it)
+// misses the call; its edits then fall back to the prompt at session end.
+function bashEdits(s: Session, p: Payload, agentId: string | undefined): void {
+  const calls = (Array.isArray(p.tool_calls) ? p.tool_calls : [])
+    .map(obj)
+    .filter((c) => c.tool_name === "Bash" && str(c.tool_use_id));
+  if (calls.length === 0) return;
+  const ts = s.now();
+  for (const { path, before, after } of changedFiles(s)) {
+    const call = callFor(calls, path);
+    const callId = str(call.tool_use_id)!;
+    const id = `${callId}:${path}`;
+    s.emit({
+      v: 1,
+      type: "edit",
+      ts,
+      id,
+      path,
+      tool: "Bash",
+      before_hash: before,
+      after_hash: after.hash,
+      ...(after.tooLarge ? { too_large: true } : {}),
+      ...agent(agentId),
+    });
+    s.state.lastHash[path] = after.hash;
+    s.state.unresolved[id] = agentId ?? "main";
+    (s.state.bashEdits[callId] ??= []).push(id);
+  }
+}
+
+// With several Bash calls in one batch, the one whose command names the file,
+// if exactly one does; otherwise the last.
+function callFor(calls: Record<string, unknown>[], path: string): Record<string, unknown> {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const naming = calls.filter((c) => {
+    const cmd = str(obj(c.tool_input).command) ?? "";
+    return cmd.includes(path) || cmd.includes(name);
+  });
+  return naming.length === 1 ? naming[0]! : calls[calls.length - 1]!;
+}
+
+// Changes nobody reported: edits the user made after the agent's last touch,
+// changes after the last batch.
 function externalChanges(s: Session, ts: string): void {
+  for (const { path, before, after } of changedFiles(s)) {
+    s.emit({
+      v: 1,
+      type: "external_change",
+      ts,
+      path,
+      before_hash: before,
+      after_hash: after.hash,
+    });
+    s.state.lastHash[path] = after.hash;
+  }
+}
+
+// Files that differ from what we last saw (else their state at session start,
+// else HEAD), sorted by path.
+function changedFiles(s: Session): { path: string; before: string | null; after: Snapshot }[] {
   const { lastHash, startDirty } = s.state;
-  const paths = new Set([...dirtyPaths(s.root), ...Object.keys(lastHash)]);
+  const dirty = dirtyPaths(s.root);
+  if (dirty.length > MAX_START_DIRTY) {
+    appendLog(s.root, "hook", `skipped change scan: ${dirty.length} dirty files`);
+    return [];
+  }
+  const paths = new Set([...dirty, ...Object.keys(lastHash)]);
   const unseen = [...paths].filter((p) => !(p in lastHash) && !(p in startDirty));
   const head = headContents(s.root, unseen);
 
+  const changed = [];
   for (const path of [...paths].sort()) {
     if (isStorePath(path)) continue;
-    const baseline =
+    const before =
       path in lastHash
         ? lastHash[path]!
         : path in startDirty
           ? startDirty[path]!
           : snapshot(s.root, head.get(path) ?? null).hash;
-    const now = snapshot(s.root, readIfExists(join(s.root, path))).hash;
-    if (now === baseline) continue;
-    s.emit({ v: 1, type: "external_change", ts, path, before_hash: baseline, after_hash: now });
-    lastHash[path] = now;
+    const after = snapshot(s.root, readIfExists(join(s.root, path)));
+    if (after.hash !== before) changed.push({ path, before, after });
   }
+  return changed;
 }
 
 function isStorePath(path: string): boolean {

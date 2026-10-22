@@ -83,11 +83,12 @@ describe("recorded sessions", () => {
       },
       {
         messages: ["m2"],
-        edits: ["toolu_01EauZvTMvDga9Djc8aViTc8"],
+        // The script's append to cart.js is an edit by its Bash call.
+        edits: ["toolu_01EauZvTMvDga9Djc8aViTc8", "toolu_01Use6aig3iZRuc325bdrjkS:src/cart.js"],
         commands: ["toolu_01NrqTUgvfCg9PzkDgzRUDR7", "toolu_01Use6aig3iZRuc325bdrjkS"],
         reads: [],
-        // Narrated, and made while p3 was in progress.
-        steps: ["p3"],
+        // Narrated while p3 was in progress; the script ran under p4.
+        steps: ["p3", "p4"],
       },
     ]);
 

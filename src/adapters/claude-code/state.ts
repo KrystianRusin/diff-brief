@@ -32,12 +32,17 @@ export type CaptureState = {
   // Intents resolved from the transcript before the edit hook fired.
   links: Record<string, { intent_id: string; msg_ref?: string; plan_step?: string }>;
   bashFailures: Record<string, { exit: number; duration_ms: number }>;
+  // Bash tool_use id → edits it made, waiting for the walk to explain them.
+  bashEdits: Record<string, string[]>;
   // Task in progress, as of the furthest point any walk has reached.
   plan: { current?: string };
   // Latest prompt from UserPromptSubmit, for edits no walk explains.
   lastPrompt?: string;
   // Prompt text → the fallback intent created for it.
   promptIntents: Record<string, string>;
+  // Subagent prompt text → its delegation intent. Either side can see it
+  // first; `emitted` once the intent event is written.
+  delegations: Record<string, { id: string; emitted: boolean }>;
   walks: Record<string, Walk>;
   // Subagent id → its transcript path, once known.
   agents: Record<string, string>;
@@ -52,8 +57,10 @@ export function emptyState(): CaptureState {
     unresolved: {},
     links: {},
     bashFailures: {},
+    bashEdits: {},
     plan: {},
     promptIntents: {},
+    delegations: {},
     walks: {},
     agents: {},
     counters: { m: 0, i: 0 },
