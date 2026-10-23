@@ -184,7 +184,7 @@ function covers(broad: string, narrow: string): boolean {
 }
 
 // One warning per file, so a file of unexplained hunks reads as one item.
-function unexplained(hunks: AnnotatedHunk[]): Warning[] {
+export function unexplained(hunks: AnnotatedHunk[]): Warning[] {
   const byPath = new Map<string, string[]>();
   for (const h of hunks) byPath.set(h.path, [...(byPath.get(h.path) ?? []), h.id]);
   return [...byPath].map(([path, ids]) => ({

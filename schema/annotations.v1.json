@@ -144,12 +144,6 @@
             "approach": {
               "type": "string"
             },
-            "skipped_alternatives": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
             "assumptions": {
               "type": "array",
               "items": {
@@ -202,7 +196,7 @@
               }
             }
           },
-          "required": ["requirement", "approach", "skipped_alternatives", "assumptions", "not_run"]
+          "required": ["requirement", "approach", "assumptions", "not_run"]
         },
         {
           "type": "null"

@@ -13,3 +13,10 @@ export {
   type Warning,
 } from "./deterministic/index.js";
 export { loadRiskRules, RiskConfigError, type RiskRule } from "./deterministic/risk-rules.js";
+export {
+  enrichModel,
+  PROMPT_VERSION,
+  type ModelInput,
+  type ModelResult,
+  type Rejection,
+} from "./model/index.js";

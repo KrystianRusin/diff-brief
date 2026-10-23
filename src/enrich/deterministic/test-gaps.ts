@@ -100,7 +100,7 @@ function uses(test: RepoTest, source: string, read: (path: string) => string | n
 
 // Whether an import specifier, seen from a file in dir, names target (a path
 // without extension).
-function names(spec: string, dir: string, target: string): boolean {
+export function names(spec: string, dir: string, target: string): boolean {
   if (spec.startsWith(".")) {
     const resolved = withoutExt(posix.normalize(posix.join(dir, spec)));
     // A directory import reaches its index file.
@@ -123,7 +123,7 @@ function resolveFile(path: string, read: (path: string) => string | null): strin
 }
 
 // Module specifiers in import, require, from ... import, and use lines.
-function specifiers(content: string): string[] {
+export function specifiers(content: string): string[] {
   const out: string[] = [];
   const patterns = [
     /(?:\bfrom\s+|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"']+)["']/g, // JS/TS
@@ -147,7 +147,7 @@ function stem(path: string): string {
     .toLowerCase();
 }
 
-function withoutExt(path: string): string {
+export function withoutExt(path: string): string {
   return path.replace(/\.[^./]+$/, "");
 }
 

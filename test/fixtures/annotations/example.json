@@ -15,9 +15,6 @@
   "briefing": {
     "requirement": "Checkout applies the cart discount twice when an order is placed (PROJ-123).",
     "approach": "Moved discount logic into one DiscountCalculator, used by both cart and order services, and applied it once in the order pipeline.",
-    "skipped_alternatives": [
-      "Tried guarding the second apply with an `alreadyDiscounted` flag; dropped because the flag would also need to survive order edits."
-    ],
     "assumptions": ["Percentage and fixed discounts never stack on the same line item."],
     "not_run": ["The cart page UI was not exercised after CartService changed."]
   },

@@ -26,7 +26,6 @@ export const Followup = z.object({
 export const Briefing = z.object({
   requirement: z.string(),
   approach: z.string(),
-  skipped_alternatives: z.array(z.string()),
   assumptions: z.array(z.string()),
   not_run: z.array(z.string()),
   followups: z.array(Followup).optional(),
