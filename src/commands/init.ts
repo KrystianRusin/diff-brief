@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { adapters } from "../adapters/index.js";
+import { DEFAULT_LLM_CONFIG } from "../llm/config.js";
 import { writeFileAtomic } from "../store/fs-util.js";
 import { configPath, findRepoRoot, STORE_DIR } from "../store/layout.js";
 
@@ -19,9 +20,7 @@ export type InitResult = { root: string; agents: string[]; changes: string[] };
 
 export class InitError extends Error {}
 
-const DEFAULT_CONFIG = {
-  llm: { provider: "claude-headless", model: "claude-opus-5-5", concurrency: 3 },
-};
+const DEFAULT_CONFIG = { llm: DEFAULT_LLM_CONFIG };
 
 const NPX = "npx --no-install diffbrief";
 
