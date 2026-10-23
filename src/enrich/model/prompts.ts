@@ -2,7 +2,7 @@
 // annotations.enrich.prompt_version and the DB-15 cache key: bump it on any
 // change here that alters what the model is asked.
 
-export const PROMPT_VERSION = "2";
+export const PROMPT_VERSION = "3";
 
 const BREVITY = `Style:
 Lead with the reason. No preamble, never "this change". Never restate the diff. Say it once, plainly, no hedging. Don't list what wasn't done unless it's a risk.`;
@@ -50,3 +50,13 @@ export const DRIFT_SYSTEM =
   system(`Task: for each intent, decide whether its edits go beyond what its stated why describes.
 Drift is work the why doesn't cover: an unrelated refactor, a file the reason doesn't touch, a behaviour change it doesn't mention. Size alone isn't drift.
 For each intent answer drift true or false; when true, list the files that go beyond it and say why in one line.`);
+
+export const QUALITY_SYSTEM =
+  system(`Task: judge each item's why, the reason given for a change, against its hunk_excerpt and cited_quote.
+verdict:
+- ok: it names the reason the change was needed, plainly.
+- restates_diff: it says what the code now does ("updates the service to return status") instead of why ("the table needs status and the API didn't return it").
+- padded: preamble, filler, hedging, or more words than the change needs.
+- ungrounded: the reason isn't supported by cited_quote (or, with no quote, by anything in the item).
+flags are what cheap checks noticed; they can be wrong.
+For any verdict but ok, give rewrite: one tighter why built on cited_quote, or null if the quote can't support one. Never invent a reason the quote doesn't give. For ok, rewrite is null.`);

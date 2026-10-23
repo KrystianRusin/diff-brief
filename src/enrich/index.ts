@@ -18,5 +18,6 @@ export {
   PROMPT_VERSION,
   type ModelInput,
   type ModelResult,
+  type QualityOutcome,
   type Rejection,
 } from "./model/index.js";

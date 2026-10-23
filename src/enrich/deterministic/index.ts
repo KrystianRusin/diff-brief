@@ -184,13 +184,13 @@ function covers(broad: string, narrow: string): boolean {
 }
 
 // One warning per file, so a file of unexplained hunks reads as one item.
-export function unexplained(hunks: AnnotatedHunk[]): Warning[] {
+export function unexplained(hunks: AnnotatedHunk[], reason = "with no recorded reason"): Warning[] {
   const byPath = new Map<string, string[]>();
   for (const h of hunks) byPath.set(h.path, [...(byPath.get(h.path) ?? []), h.id]);
   return [...byPath].map(([path, ids]) => ({
     kind: "unexplained" as const,
     hunks: ids,
-    detail: `${path}: ${ids.length} ${ids.length === 1 ? "hunk" : "hunks"} with no recorded reason`,
+    detail: `${path}: ${ids.length} ${ids.length === 1 ? "hunk" : "hunks"} ${reason}`,
     source: "log" as const,
   }));
 }

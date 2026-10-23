@@ -11,6 +11,7 @@ import { buildConcepts, ConceptsReply } from "./concepts.js";
 import { driftCandidates, driftedHunks, DriftReply } from "./drift.js";
 import { groundIntents, IntentsReply, type GroundedIntent, type Rejection } from "./intents.js";
 import { checkLinks, importRelation, LinksReply, type Link } from "./links.js";
+import { qualityPass, qualityStats, type QualityOutcome } from "./quality.js";
 import {
   BRIEFING_SYSTEM,
   CONCEPTS_SYSTEM,
@@ -22,10 +23,12 @@ import {
 
 export { PROMPT_VERSION } from "./prompts.js";
 export type { Rejection } from "./intents.js";
+export type { QualityOutcome } from "./quality.js";
 
 // The model passes (DB-13), on top of the deterministic result (DB-11): a
-// grounded why per intent, links between intents, concepts with a review
-// path, the briefing, and drift. The model writes only what the rules can't,
+// grounded why per intent, checked for quality (DB-14) before anything builds
+// on it, links between intents, concepts with a review path, the briefing,
+// and drift. The model writes only what the rules can't,
 // and every pass is checked in code. A pass that fails leaves its fields as
 // the deterministic stage had them and records an error; it never takes
 // deterministic output away.
@@ -53,6 +56,8 @@ export type ModelResult = Pick<
 > & {
   // Pass 1 intents that failed grounding, for logs and tests.
   rejected: Rejection[];
+  // What the quality pass did with each intent, for logs and tests.
+  quality: QualityOutcome[];
 };
 
 type AnnotatedHunk = Annotations["hunks"][number];
@@ -97,18 +102,44 @@ export async function enrichModel(input: ModelInput, provider: LlmProvider): Pro
 
   // Each hunk takes the grounded intent behind most of the edits that wrote
   // it, the latest edit breaking a tie. Hunks no grounded intent covers keep
-  // their recorded intent, if they have one.
-  const byEdit = new Map(grounded.flatMap((g) => g.editIds.map((id) => [id, g] as const)));
-  const hunks = det.hunks.map((h): AnnotatedHunk => {
-    const g = pick((mapping.byHunk[h.id]?.editIds ?? []).flatMap((id) => byEdit.get(id) ?? []));
-    if (!g) return h;
-    const { serves: _, ...rest } = h;
-    return { ...rest, intent_id: g.id, why: g.why, source: { ...h.source, why: "llm" } };
-  });
-
-  const live = grounded.filter((g) => hunks.some((h) => h.intent_id === g.id));
+  // their recorded intent, if they have one. A hunk whose intent the quality
+  // pass dropped, and that has no recorded intent to fall back on, shows the
+  // agent's quote as unexplained.
+  const editsOf = (h: AnnotatedHunk) => mapping.byHunk[h.id]?.editIds ?? [];
+  const byEdit = (gs: GroundedIntent[]) =>
+    new Map(gs.flatMap((g) => g.editIds.map((id) => [id, g] as const)));
+  const assign = (gs: GroundedIntent[], dropped: GroundedIntent[] = []) => {
+    const owner = byEdit(gs);
+    const lost = byEdit(dropped);
+    return det.hunks.map((h): AnnotatedHunk => {
+      const g = pick(editsOf(h).flatMap((id) => owner.get(id) ?? []));
+      if (g) {
+        const { serves: _, ...rest } = h;
+        return { ...rest, intent_id: g.id, why: g.why, source: { ...h.source, why: "llm" } };
+      }
+      const d = pick(editsOf(h).flatMap((id) => lost.get(id) ?? []));
+      if (!d || h.intent_id !== null) return h;
+      const quote = d.source_msg?.quote ?? null;
+      return {
+        ...h,
+        serves: "unexplained",
+        why: quote,
+        source: { ...h.source, why: quote === null ? null : "quote" },
+      };
+    });
+  };
 
   const diffHunks = new Map(input.hunks.map((h) => [h.id, h]));
+  const first = assign(grounded);
+  const quality = await qualityPass(
+    grounded.filter((g) => first.some((h) => h.intent_id === g.id)),
+    (id) => first.filter((h) => h.intent_id === id).map((h) => diffHunks.get(h.id)!),
+    ask,
+  );
+  const hunks = assign(quality.intents, quality.dropped);
+
+  const live = quality.intents.filter((g) => hunks.some((h) => h.intent_id === g.id));
+
   const hunksOf = new Map<string, Hunk[]>();
   for (const h of hunks) {
     if (h.intent_id)
@@ -220,15 +251,25 @@ export async function enrichModel(input: ModelInput, provider: LlmProvider): Pro
     intents: rest.intents,
     warnings: [
       ...det.warnings.filter((w) => w.kind !== "unexplained"),
-      ...unexplained(final.filter((h) => h.serves === "unexplained")),
+      ...unexplained(final.filter((h) => h.serves === "unexplained" && h.source.why !== "quote")),
+      ...unexplained(
+        final.filter((h) => h.source.why === "quote"),
+        "whose model reason didn't hold up; the agent's words are shown instead",
+      ),
     ],
     read_first: det.read_first,
     off_path: rest.off_path,
     concepts: rest.concepts,
     briefing: rest.briefing,
     errors,
-    enrich: { provider: provider.id, ...(model ? { model } : {}), prompt_version: PROMPT_VERSION },
+    enrich: {
+      provider: provider.id,
+      ...(model ? { model } : {}),
+      prompt_version: PROMPT_VERSION,
+      quality: qualityStats(quality.outcomes),
+    },
     rejected,
+    quality: quality.outcomes,
   };
 }
 

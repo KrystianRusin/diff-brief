@@ -21,6 +21,7 @@ import {
   DRIFT_SYSTEM,
   INTENTS_SYSTEM,
   LINKS_SYSTEM,
+  QUALITY_SYSTEM,
 } from "../../src/enrich/model/prompts.js";
 import { LlmError, type LlmProvider } from "../../src/llm/index.js";
 import { parseAnnotations } from "../../src/schema/annotations.js";
@@ -295,7 +296,13 @@ describe("briefing", () => {
 
 // Answers each pass from its input, as a well-behaved model would: cite the
 // first statement before the edits, else the plan step, else the request.
-function scripted(fail: string[] = []): LlmProvider & { calls: string[] } {
+// `judge` stands in for the quality pass; by default it passes everything.
+// `lead` opens every why pass 1 writes.
+function scripted(
+  fail: string[] = [],
+  judge: (item: { id: string; why: string }) => unknown = () => ({ verdict: "ok", rewrite: null }),
+  lead = "Because: ",
+): LlmProvider & { calls: string[] } {
   const calls: string[] = [];
   const pass = new Map([
     [INTENTS_SYSTEM, "intents"],
@@ -303,6 +310,7 @@ function scripted(fail: string[] = []): LlmProvider & { calls: string[] } {
     [CONCEPTS_SYSTEM, "concepts"],
     [BRIEFING_SYSTEM, "briefing"],
     [DRIFT_SYSTEM, "drift"],
+    [QUALITY_SYSTEM, "quality"],
   ]);
   return {
     id: "fake",
@@ -313,7 +321,15 @@ function scripted(fail: string[] = []): LlmProvider & { calls: string[] } {
       calls.push(name);
       if (fail.includes(name)) throw new LlmError(`${name} failed`);
       const input = JSON.parse(req.prompt);
-      const data = answer(name, input);
+      const data =
+        name === "quality"
+          ? {
+              items: (input as { items: { id: string; why: string }[] }).items.map((i) => ({
+                id: i.id,
+                ...(judge(i) as object),
+              })),
+            }
+          : answer(name, input, lead);
       return { text: "", data: req.schema!.parse(data), model: "fake-model" };
     },
   };
@@ -326,7 +342,7 @@ type PassInput = ContextPack & {
   notRun: string[];
 };
 
-function answer(pass: string, input: PassInput): unknown {
+function answer(pass: string, input: PassInput, lead: string): unknown {
   switch (pass) {
     case "intents": {
       const p = input;
@@ -336,7 +352,7 @@ function answer(pass: string, input: PassInput): unknown {
         intents: [
           {
             edit_ids: p.edits.map((e) => e.id),
-            why: msg ? `Because: ${msg.text.slice(0, 40)}` : "Carries out the plan step.",
+            why: msg ? `${lead}${msg.text.slice(0, 40)}` : `${lead}carries out the plan step.`,
             cite_msg_id: msg?.id ?? null,
             quote: msg ? msg.text.slice(0, 20) : null,
             serves: step ? { kind: "plan_step", ref: step } : { kind: "ticket", ref: "ticket" },
@@ -393,9 +409,11 @@ describe("end to end on a recorded session", () => {
     vi.unstubAllEnvs();
   });
 
-  async function enrich(provider: LlmProvider) {
+  // recorded: false forgets the intents the agent recorded, as if it never had.
+  async function enrich(provider: LlmProvider, { recorded = true } = {}) {
     const root = run.repo.dir;
     const inputs = loadBriefingInputs(root, {});
+    if (!recorded) for (const m of Object.values(inputs.mapping.byHunk)) delete m.intentId;
     const blob = (h: string) => (hasBlob(root, h) ? getBlob(root, h) : null);
     const episodes = splitEpisodes(inputs.events);
     const packs = buildContextPacks(inputs.events, episodes, {
@@ -413,7 +431,7 @@ describe("end to end on a recorded session", () => {
       },
       provider,
     );
-    const { rejected: _, ...parts } = result;
+    const { rejected: _, quality: __, ...parts } = result;
     const annotations = parseAnnotations({
       v: 1,
       briefing_id: inputs.resolved.briefingId,
@@ -431,10 +449,11 @@ describe("end to end on a recorded session", () => {
     const { inputs, result, annotations } = await enrich(provider);
 
     expect(result.errors).toEqual([]);
-    expect(annotations.enrich).toEqual({
+    expect(annotations.enrich).toMatchObject({
       provider: "fake",
       model: "fake-model",
       prompt_version: PROMPT_VERSION,
+      quality: { rewritten: 0, dropped: 0 },
     });
     expect(provider.calls.filter((c) => c === "intents")).toHaveLength(
       splitEpisodes(inputs.events).length,
@@ -471,5 +490,68 @@ describe("end to end on a recorded session", () => {
     const det = enrichDeterministic(inputs);
     expect(annotations.hunks.map((h) => h.intent_id)).toEqual(det.hunks.map((h) => h.intent_id));
     expect(annotations.hunks.every((h) => h.why === null)).toBe(true);
+  });
+
+  // Every why opens with a preamble, so all are suspects; the judge rewrites
+  // the first and refuses the rest.
+  async function judged(opts: { recorded?: boolean } = {}) {
+    let first: string | undefined;
+    const provider = scripted(
+      [],
+      (i) => {
+        first ??= i.id;
+        return i.id === first
+          ? { verdict: "padded", rewrite: "the reviewer asked for it" }
+          : { verdict: "ungrounded", rewrite: null };
+      },
+      "This change: ",
+    );
+    const run = await enrich(provider, opts);
+    expect(provider.calls).toContain("quality");
+    const outcomes = run.result.quality.filter((o) => o.verdict);
+    expect(outcomes.length).toBeGreaterThan(1);
+    expect(outcomes.map((o) => o.outcome)).toEqual([
+      "rewritten",
+      ...outcomes.slice(1).map(() => "dropped"),
+    ]);
+    expect(run.annotations.enrich.quality).toMatchObject({
+      rewritten: 1,
+      dropped: outcomes.length - 1,
+    });
+    const rewritten = run.annotations.hunks.filter((h) => h.intent_id === first);
+    expect(rewritten.length).toBeGreaterThan(0);
+    expect(rewritten.every((h) => h.why === "the reviewer asked for it")).toBe(true);
+    const dropped = new Set(outcomes.slice(1).map((o) => o.intent));
+    expect(run.annotations.intents.some((i) => dropped.has(i.id))).toBe(false);
+    return { ...run, first: first! };
+  }
+
+  test("quality: a dropped why falls back to the agent's recorded intent", async () => {
+    const { inputs, annotations, first } = await judged();
+    const det = new Map(enrichDeterministic(inputs).hunks.map((h) => [h.id, h]));
+    for (const h of annotations.hunks.filter((h) => h.intent_id !== first))
+      expect(h).toEqual(det.get(h.id));
+  });
+
+  test("quality: with nothing recorded, a dropped why shows the agent's quote", async () => {
+    const { result, annotations, first } = await judged({ recorded: false });
+    const rest = annotations.hunks.filter((h) => h.intent_id !== first);
+    expect(rest.length).toBeGreaterThan(0);
+    for (const h of rest) {
+      expect(h.serves).toBe("unexplained");
+      expect(h.intent_id).toBeNull();
+      expect(annotations.off_path).toContain(h.id);
+    }
+    // Intents grounded by a quote show it; those grounded by a plan step
+    // have no words of the agent's to show.
+    const quoted = rest.filter((h) => h.source.why === "quote");
+    expect(quoted.length).toBeGreaterThan(0);
+    // The scripted model quotes the start of the message its why repeats.
+    const whys = result.quality.filter((o) => o.outcome === "dropped").map((o) => o.why);
+    for (const h of quoted) expect(whys.some((w) => w.includes(h.why!))).toBe(true);
+    expect(rest.filter((h) => h.source.why === null).every((h) => h.why === null)).toBe(true);
+    expect(
+      annotations.warnings.find((w) => w.detail.includes("agent's words"))?.hunks?.sort(),
+    ).toEqual(quoted.map((h) => h.id).sort());
   });
 });
