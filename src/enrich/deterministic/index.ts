@@ -9,6 +9,7 @@ import {
   tagWeights,
   type RiskRule,
 } from "./risk-rules.js";
+import { testGaps, type RepoTest } from "./test-gaps.js";
 import { testWarnings } from "./test-rules.js";
 
 // Facts that need no model, from the log and the diff (DB-11): whether a
@@ -31,7 +32,9 @@ const CHECK_KINDS = new Set(["test", "build", "lint"]);
 
 export function enrichDeterministic(
   inputs: Pick<BriefingInputs, "hunks" | "events" | "mapping">,
-  opts: { rules?: RiskRule[] } = {},
+  // tests: the repo's test files on the final side; without them the
+  // untested-change checks are skipped.
+  opts: { rules?: RiskRule[]; tests?: RepoTest[]; read?: (path: string) => string | null } = {},
 ): DeterministicResult {
   const { hunks, events, mapping } = inputs;
   const rules = (opts.rules ?? DEFAULT_RISK_RULES).map(compileRule);
@@ -63,8 +66,17 @@ export function enrichDeterministic(
   });
 
   const offPath = annotated.filter((h) => h.serves === "unexplained").map((h) => h.id);
+  const gaps = opts.tests
+    ? testGaps(
+        hunks,
+        opts.tests,
+        timeline.commands.some((c) => c.kind === "test"),
+        opts.read,
+      )
+    : undefined;
   const warnings = [
     ...testWarnings(hunks),
+    ...(gaps?.warnings ?? []),
     ...failedNotRerun(timeline.commands),
     ...unexplained(annotated.filter((h) => h.serves === "unexplained")),
   ];
@@ -73,7 +85,7 @@ export function enrichDeterministic(
     hunks: annotated,
     intents: intents(annotated, events),
     warnings,
-    read_first: readFirst(annotated, hunks, weights),
+    read_first: readFirst(annotated, hunks, weights, gaps?.untested ?? new Set()),
     off_path: offPath,
   };
 }
@@ -183,12 +195,13 @@ function unexplained(hunks: AnnotatedHunk[]): Warning[] {
   }));
 }
 
-// riskWeight(tags) + 2 if never executed + 1 if unexplained + log(size).
-// Ties keep diff order.
+// riskWeight(tags) + 2 if never executed + 1 if unexplained + 1 if no test
+// uses its file + log(size). Ties keep diff order.
 function readFirst(
   annotated: AnnotatedHunk[],
   hunks: Hunk[],
   weights: Map<string, number>,
+  untested: Set<string>,
 ): string[] {
   const score = annotated.map((h, i) => {
     const size = hunks[i]!.lines.filter((l) => l.kind !== " ").length;
@@ -199,6 +212,7 @@ function readFirst(
         risk +
         (h.exec === "never_executed" ? 2 : 0) +
         (h.serves === "unexplained" ? 1 : 0) +
+        (untested.has(h.path) ? 1 : 0) +
         Math.log(1 + size),
     };
   });

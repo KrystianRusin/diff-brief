@@ -11,6 +11,7 @@ import {
   riskTags,
   type RiskRule,
 } from "../../src/enrich/deterministic/risk-rules.js";
+import { testGaps } from "../../src/enrich/deterministic/test-gaps.js";
 import { testWarnings } from "../../src/enrich/deterministic/test-rules.js";
 import type { HunkMapping } from "../../src/mapping/index.js";
 import { parseAnnotations } from "../../src/schema/annotations.js";
@@ -409,5 +410,88 @@ describe("merged into annotations", () => {
       ["src/auth/login.ts", "tested", ["auth"]],
       ["src/b.ts", "never_executed", []],
     ]);
+  });
+});
+
+describe("untested changes", () => {
+  const code = (path: string) => hunk(path, ["+x"]);
+  const t = (path: string, content = "") => ({ path, content });
+  const gaps = (
+    hunks: Hunk[],
+    tests: { path: string; content: string }[],
+    files: Record<string, string> = {},
+    ranTests = false,
+  ) => testGaps(hunks, tests, ranTests, (p) => files[p] ?? null);
+  const details = (g: ReturnType<typeof gaps>) => g.warnings.map((w) => w.detail);
+
+  test("a repo with no tests gets one warning, unless a test command ran", () => {
+    const g = gaps([code("src/a.ts"), code("src/b.py")], []);
+    expect(g.warnings.map((w) => [w.kind, w.hunks?.length])).toEqual([["no_tests", 2]]);
+    expect([...g.untested]).toEqual(["src/a.ts", "src/b.py"]);
+    // Rust keeps tests inside the source file; a test run is the only sign.
+    expect(gaps([code("src/lib.rs")], [], {}, true).warnings).toEqual([]);
+  });
+
+  test("a changed test with the same name, or one that imports it, goes with the file", () => {
+    const changedTest = hunk("test/order.test.js", ["+  expect(1);"]);
+    expect(gaps([code("src/order.js"), changedTest], [t("test/order.test.js")]).warnings).toEqual(
+      [],
+    );
+
+    const importer = hunk("test/checkout.test.ts", ["+x"]);
+    const content = 'import { total } from "../src/cart/total.js";';
+    expect(
+      gaps([code("src/cart/total.ts"), importer], [t("test/checkout.test.ts", content)]).warnings,
+    ).toEqual([]);
+  });
+
+  test("an existing test that wasn't touched is named; none at all marks the file untested", () => {
+    const g = gaps(
+      [code("src/a.ts"), code("src/b.ts")],
+      [t("test/a.test.ts"), t("test/other.test.ts", 'import "../src/x.js";')],
+    );
+    expect(details(g)).toEqual([
+      "src/a.ts: no test added or changed (test/a.test.ts uses it but wasn't touched)",
+      "src/b.ts: no test added or changed, and no test file uses it",
+    ]);
+    expect([...g.untested]).toEqual(["src/b.ts"]);
+  });
+
+  test("an import one hop away counts: a test importing a barrel that re-exports the file", () => {
+    const tests = [t("test/enrich.test.ts", 'import { f } from "../src/enrich/index.js";')];
+    const files = { "src/enrich/index.ts": 'export { f } from "./deterministic/rules.js";' };
+    expect(gaps([code("src/enrich/deterministic/rules.ts")], tests, files).untested.size).toBe(0);
+    // Two hops is too far.
+    const far = {
+      "src/enrich/index.ts": 'export * from "./mid.js";',
+      "src/enrich/mid.ts": 'export * from "./deep.js";',
+    };
+    expect(gaps([code("src/enrich/deep.ts")], tests, far).untested).toEqual(
+      new Set(["src/enrich/deep.ts"]),
+    );
+  });
+
+  test("python modules, go packages, and generic names", () => {
+    expect(
+      gaps(
+        [code("app/billing/charge.py")],
+        [t("tests/test_api.py", "from app.billing.charge import run")],
+      ).untested.size,
+    ).toBe(0);
+    expect(
+      gaps([code("pkg/server/serve.go")], [t("pkg/server/routes_test.go")]).untested.size,
+    ).toBe(0);
+    // index.ts says nothing about what's in it, so test/index.test.ts doesn't count.
+    expect(gaps([code("src/enrich/index.ts")], [t("test/index.test.ts")]).untested.size).toBe(1);
+  });
+
+  test("helpers beside the tests, docs and config aren't code that needs a test", () => {
+    const hs = [
+      code("test/helpers/replay.ts"),
+      code("README.md"),
+      code("package.json"),
+      code("tests/fixtures/a.py"),
+    ];
+    expect(gaps(hs, [t("test/a.test.ts")]).warnings).toEqual([]);
   });
 });

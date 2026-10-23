@@ -52,7 +52,16 @@ export const Concept = z.object({
 });
 
 export const Warning = z.object({
-  kind: z.enum(["deleted_test", "weakened_test", "unexplained", "failed_not_rerun"]),
+  kind: z.enum([
+    "deleted_test",
+    "weakened_test",
+    "unexplained",
+    "failed_not_rerun",
+    // Code changed with no test added or changed for it.
+    "untested_change",
+    // The repo has no tests and none ran.
+    "no_tests",
+  ]),
   hunks: z.array(z.string()).optional(),
   detail: z.string(),
   source: z.enum(["rules", "log"]),

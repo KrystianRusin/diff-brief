@@ -322,7 +322,14 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["deleted_test", "weakened_test", "unexplained", "failed_not_rerun"]
+            "enum": [
+              "deleted_test",
+              "weakened_test",
+              "unexplained",
+              "failed_not_rerun",
+              "untested_change",
+              "no_tests"
+            ]
           },
           "hunks": {
             "type": "array",

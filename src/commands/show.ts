@@ -1,4 +1,7 @@
 import { loadBriefingInputs, type BriefingInputs } from "../briefing/inputs.js";
+import { finalPaths, targetContents } from "../diff/contents.js";
+import { isTestFile } from "../enrich/deterministic/test-rules.js";
+import type { RepoTest } from "../enrich/deterministic/test-gaps.js";
 import type { Hunk } from "../diff/index.js";
 import { enrichDeterministic, loadRiskRules, type RiskRule } from "../enrich/index.js";
 import type { Annotations } from "../schema/annotations.js";
@@ -16,6 +19,8 @@ export type ShowOptions = TargetRequest & {
   full?: boolean;
   color?: boolean;
   rules?: RiskRule[];
+  tests?: RepoTest[];
+  read?: (path: string) => string | null;
 };
 
 // "test run after this change", not "covered" (DB-11).
@@ -83,12 +88,22 @@ export function renderShow(inputs: BriefingInputs, opts: ShowOptions = {}): stri
     ),
   );
 
-  const det = enrichDeterministic(inputs, opts.rules ? { rules: opts.rules } : {});
+  const det = enrichDeterministic(inputs, {
+    ...(opts.rules ? { rules: opts.rules } : {}),
+    ...(opts.tests ? { tests: opts.tests } : {}),
+    ...(opts.read ? { read: opts.read } : {}),
+  });
+  // A passing run says little about a file no test goes with.
+  const noTest = new Set(
+    det.warnings.flatMap((w) =>
+      w.kind === "untested_change" || w.kind === "no_tests" ? (w.hunks ?? []) : [],
+    ),
+  );
   const facts = new Map(det.hunks.map((h) => [h.id, h]));
   const byId = new Map(hunks.map((h) => [h.id, h]));
   out.push("", style(1, "▸ read these first"));
   for (const id of det.read_first)
-    out.push(`    ${hunkLine(byId.get(id)!, facts.get(id)!, style)}`);
+    out.push(`    ${hunkLine(byId.get(id)!, facts.get(id)!, noTest.has(id), style)}`);
   if (det.warnings.length) {
     out.push("", style(31, "▸ warnings"));
     for (const w of det.warnings) out.push(`  ${style(2, w.kind)}  ${w.detail}`);
@@ -103,12 +118,13 @@ export function renderShow(inputs: BriefingInputs, opts: ShowOptions = {}): stri
     } else {
       out.push(style(36, `▸ intent ${intentId}`) + dim(" (not in the log)"));
     }
-    for (const h of hs) pushHunk(out, h, facts.get(h.id)!, inputs, opts, style);
+    for (const h of hs) pushHunk(out, h, facts.get(h.id)!, noTest.has(h.id), inputs, opts, style);
   }
 
   if (unexplained.length) {
     out.push("", style(33, "▸ unexplained") + dim(" · no recorded edit wrote these lines"));
-    for (const h of unexplained) pushHunk(out, h, facts.get(h.id)!, inputs, opts, style);
+    for (const h of unexplained)
+      pushHunk(out, h, facts.get(h.id)!, noTest.has(h.id), inputs, opts, style);
   }
 
   if (mapping.deadEnds.length) {
@@ -126,6 +142,7 @@ function pushHunk(
   out: string[],
   h: Hunk,
   fact: AnnotatedHunk,
+  noTest: boolean,
   inputs: BriefingInputs,
   opts: ShowOptions,
   style: Style,
@@ -136,7 +153,8 @@ function pushHunk(
     ...(fact.intent_history.length ? [`earlier: ${fact.intent_history.join(", ")}`] : []),
   ];
   out.push(
-    `    ${hunkLine(h, fact, style)}` + (notes.length ? style(2, `  ${notes.join(" · ")}`) : ""),
+    `    ${hunkLine(h, fact, noTest, style)}` +
+      (notes.length ? style(2, `  ${notes.join(" · ")}`) : ""),
   );
   if (opts.diff === false) return;
   const lines = opts.full ? h.lines : h.lines.slice(0, DIFF_LINES);
@@ -150,11 +168,14 @@ function pushHunk(
 }
 
 // Path, range, status, then the facts: exec and risk tags.
-function hunkLine(h: Hunk, fact: AnnotatedHunk, style: Style): string {
+function hunkLine(h: Hunk, fact: AnnotatedHunk, noTest: boolean, style: Style): string {
   const range = h.lines.length
     ? ` @@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines}`
     : "";
-  const [code, label] = EXEC_LABEL[fact.exec];
+  const [code, label] =
+    fact.exec === "tested" && noTest
+      ? [33, "tests passed after, none for this file"]
+      : EXEC_LABEL[fact.exec];
   return (
     `${style(1, h.path)}${style(2, range)}` +
     (h.status === "modified" ? "" : style(2, ` (${h.status})`)) +
@@ -190,9 +211,26 @@ export function showAction(options: ShowOptions) {
     if (!root) throw new Error("not inside a git repository");
     const inputs = loadBriefingInputs(root, options);
     const color = options.color ?? (process.stdout.isTTY && !process.env.NO_COLOR);
-    process.stdout.write(renderShow(inputs, { ...options, color, rules: loadRiskRules(root) }));
+    const rules = loadRiskRules(root);
+    process.stdout.write(
+      renderShow(inputs, { ...options, color, rules, ...testFiles(root, inputs) }),
+    );
   } catch (err) {
     console.error(`diffbrief show: ${err instanceof Error ? err.message : String(err)}`);
     process.exitCode = 1;
   }
+}
+
+// The repo's test files on the diff's final side, and a reader for any file
+// there, for the untested-change checks.
+export function testFiles(root: string, inputs: BriefingInputs) {
+  const contents = targetContents(root, inputs.resolved.spec);
+  const read = (path: string) => contents.final(path)?.toString("utf8") ?? null;
+  const tests = finalPaths(root, inputs.resolved.spec)
+    .filter(isTestFile)
+    .flatMap((path) => {
+      const content = read(path);
+      return content === null ? [] : [{ path, content }];
+    });
+  return { tests, read };
 }

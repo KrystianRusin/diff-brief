@@ -51,3 +51,22 @@ function readOrNull(path: string): Buffer | null {
     return null;
   }
 }
+
+// Every file on the final side of the spec: the working tree (untracked but
+// not ignored files included) or the head commit's tree.
+export function finalPaths(root: string, spec: DiffSpec): string[] {
+  const args =
+    spec.kind === "worktree"
+      ? ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]
+      : ["ls-tree", "-r", "-z", "--name-only", spec.kind === "commit" ? spec.sha : spec.head];
+  try {
+    const out = execFileSync("git", args, {
+      cwd: root,
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 1024 * 1024 * 1024,
+    });
+    return [...new Set(out.toString("utf8").split("\0").filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
